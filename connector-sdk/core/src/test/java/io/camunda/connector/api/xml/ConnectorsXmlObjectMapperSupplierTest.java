@@ -95,7 +95,13 @@ class ConnectorsXmlObjectMapperSupplierTest {
 
         var docRef =
                 new CamundaDocumentReferenceModel("default", UUID.randomUUID().toString(), "hash", null);
+        // Debug
+        System.out.println("*** *** *** docRef: " + docRef);
+        // /Debug
         String docXml = mapper.writeValueAsString(docRef);
+        // Debug
+        System.out.println("docXml: " + docXml);
+        // /Debug
 
         // the POJO expects a single Document, but we wrap it in a list-style container
         String xml =

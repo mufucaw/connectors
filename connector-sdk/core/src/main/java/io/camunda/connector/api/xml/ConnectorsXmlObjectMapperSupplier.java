@@ -16,31 +16,44 @@
  */
 package io.camunda.connector.api.xml;
 
-import com.fasterxml.jackson.databind.*;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.Version;
+import com.fasterxml.jackson.databind.DeserializationContext;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonDeserializer;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.MapperFeature;
+import com.fasterxml.jackson.databind.Module;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.module.SimpleModule;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.xml.XmlMapper;
 import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.camunda.connector.document.jackson.JacksonModuleDocumentDeserializer;
 import io.camunda.connector.document.jackson.JacksonModuleDocumentDeserializer.DocumentModuleSettings;
 import io.camunda.connector.document.jackson.JacksonModuleDocumentSerializer;
+import io.camunda.connector.document.jackson.deserializer.DocumentDeserializer;
 import io.camunda.connector.feel.jackson.JacksonModuleFeelFunction;
+import io.camunda.document.Document;
 import io.camunda.document.factory.DocumentFactory;
 import io.camunda.intrinsic.DefaultIntrinsicFunctionExecutor;
 import io.camunda.intrinsic.IntrinsicFunctionExecutor;
+import java.io.IOException;
 
 /** XML-specific ObjectMapper supplier for the Connector runtime. */
 public final class ConnectorsXmlObjectMapperSupplier {
 
-  /** Base mapper cloned for every request to keep thread-safety and per-call tweaks. */
+  /** Base mapper cloned per request to keep thread-safety and per-call tweaks. */
   private static final ObjectMapper DEFAULT_MAPPER =
-          XmlMapper.builder()  // <-- XML aware mapper
-                  .defaultUseWrapper(false)  // Mimic JSON list behavior
+          XmlMapper.builder()
+                  .defaultUseWrapper(false)
                   .addModules(
                           new JacksonModuleFeelFunction(),
                           new Jdk8Module(),
                           new JavaTimeModule(),
                           new JacksonModuleDocumentSerializer())
-                  // Identical feature flags to JSON variant
                   .disable(SerializationFeature.FAIL_ON_EMPTY_BEANS)
                   .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                   .enable(MapperFeature.ACCEPT_CASE_INSENSITIVE_ENUMS)
@@ -65,6 +78,50 @@ public final class ConnectorsXmlObjectMapperSupplier {
     final ObjectMapper copy = DEFAULT_MAPPER.copy();
     final IntrinsicFunctionExecutor exec = new DefaultIntrinsicFunctionExecutor(copy);
 
-    return copy.registerModule(new JacksonModuleDocumentDeserializer(factory, exec, settings));
+    // original module
+    copy.registerModule(new JacksonModuleDocumentDeserializer(factory, exec, settings));
+    // override that unwraps the <CamundaDocumentReferenceModel> XML wrapper
+    copy.registerModule(buildWrapperAwareModule(factory, exec, settings));
+
+    return copy;
+  }
+
+  // helper that builds the override module
+  private static Module buildWrapperAwareModule(
+          DocumentFactory factory,
+          IntrinsicFunctionExecutor exec,
+          DocumentModuleSettings settings) {
+
+    SimpleModule module =
+            new SimpleModule("xml-document-wrapper", new Version(1, 0, 0, null, null, null));
+
+    module.addDeserializer(
+            Document.class, new WrapperAwareDocumentDeserializer(factory, exec, settings));
+
+    return module;
+  }
+
+  // the “unwrap-and-delegate” deserializer
+  private static final class WrapperAwareDocumentDeserializer extends JsonDeserializer<Document> {
+
+    private final DocumentDeserializer delegate;
+
+    WrapperAwareDocumentDeserializer(
+            DocumentFactory factory, IntrinsicFunctionExecutor exec, DocumentModuleSettings settings) {
+      this.delegate = new DocumentDeserializer(factory, exec, settings);
+    }
+
+    @Override
+    public Document deserialize(JsonParser p, DeserializationContext ctx) throws IOException {
+      JsonNode node = p.getCodec().readTree(p);
+
+      // unwrap <CamundaDocumentReferenceModel> if it is the *only* child
+      if (node.isObject() && node.size() == 1) {
+        node = ((ObjectNode) node).elements().next();
+      }
+
+      // delegate to the original logic
+      return delegate.deserialize(node.traverse(p.getCodec()), ctx);
+    }
   }
 }
