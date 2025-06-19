@@ -62,6 +62,7 @@ public final class ConnectorsXmlObjectMapperSupplier {
                   .enable(DeserializationFeature.ACCEPT_SINGLE_VALUE_AS_ARRAY)
                   .enable(DeserializationFeature.UNWRAP_SINGLE_VALUE_ARRAYS)
                   .enable(DeserializationFeature.READ_UNKNOWN_ENUM_VALUES_USING_DEFAULT_VALUE)
+                  .addModule(buildPrimitiveArrayWrapperModule())
                   .build();
 
   private ConnectorsXmlObjectMapperSupplier() {}
@@ -99,6 +100,55 @@ public final class ConnectorsXmlObjectMapperSupplier {
             Document.class, new WrapperAwareDocumentDeserializer(factory, exec, settings));
 
     return module;
+  }
+
+  // helper that builds the override module for primitive arrays like <Integer>1</Integer>
+  private static Module buildPrimitiveArrayWrapperModule() {
+    SimpleModule module =
+            new SimpleModule("xml-primitive-array-wrapper", new Version(1, 0, 0, null, null, null));
+
+    module.addDeserializer(int[].class, new PrimitiveIntArrayWrapperDeserializer());
+
+    return module;
+  }
+
+  /** Deserializer that unwraps a single primitive value (or list of primitives) wrapped in an
+   * element that represents the "array entry" (e.g. <Integer>1</Integer>).
+   * <p>
+   * XmlMapper represents the input <code><Integer>1</Integer></code> as an object
+   * with exactly one field named <code>"Integer"</code>.  When the target type is an <code>int[]</code>,
+   * Jackson's default {@link com.fasterxml.jackson.databind.deser.std.PrimitiveArrayDeserializers.IntDeser}
+   * cannot handle the extra wrapper layer and fails with a {@link com.fasterxml.jackson.databind.exc.MismatchedInputException}.
+   * This deserializer collapses that single‑field wrapper into the expected scalar value and then builds
+   * the resulting array.
+   */
+  private static final class PrimitiveIntArrayWrapperDeserializer extends JsonDeserializer<int[]> {
+
+    @Override
+    public int[] deserialize(JsonParser p, DeserializationContext ctx) throws IOException {
+      JsonNode node = p.getCodec().readTree(p);
+
+      // Handle the common case <Integer>1</Integer>
+      if (node.isObject() && node.size() == 1) {
+        JsonNode firstChild = node.elements().next();
+
+        // <Integer>1</Integer>
+        if (firstChild.isValueNode()) {
+          return new int[] { firstChild.asInt() };
+        }
+        // <Integer>1</Integer><Integer>2</Integer> (introduced as array)
+        if (firstChild.isArray()) {
+          int[] arr = new int[firstChild.size()];
+          for (int i = 0; i < firstChild.size(); i++) {
+            arr[i] = firstChild.get(i).asInt();
+          }
+          return arr;
+        }
+      }
+
+      // Fallback to standard mechanism
+      return p.getCodec().treeToValue(node, int[].class);
+    }
   }
 
   // the “unwrap-and-delegate” deserializer
