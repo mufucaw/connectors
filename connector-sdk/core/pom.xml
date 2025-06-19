@@ -14,6 +14,10 @@
   <artifactId>connector-core</artifactId>
   <packaging>jar</packaging>
 
+  <properties>
+    <jackson.version>2.19.0</jackson.version>
+  </properties>
+
   <dependencies>
     <dependency>
       <groupId>org.slf4j</groupId>
@@ -25,6 +29,12 @@
       <groupId>com.fasterxml.jackson.core</groupId>
       <artifactId>jackson-databind</artifactId>
       <scope>provided</scope>
+    </dependency>
+    <!-- Does this belong in the Connector runtime? -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.dataformat</groupId>
+      <artifactId>jackson-dataformat-xml</artifactId>
+      <version>${jackson.version}</version>
     </dependency>
     <dependency>
       <groupId>io.camunda.connector</groupId>

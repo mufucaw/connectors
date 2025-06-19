@@ -9,6 +9,7 @@ package io.camunda.connector.inbound.utils;
 import com.google.common.net.HttpHeaders;
 import com.google.common.net.MediaType;
 import io.camunda.connector.api.json.ConnectorsObjectMapperSupplier;
+import io.camunda.connector.api.xml.ConnectorsXmlObjectMapperSupplier;
 import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -33,11 +34,18 @@ public class HttpWebhookUtil {
     }
     if (MediaType.FORM_DATA.toString().equalsIgnoreCase(contentTypeHeader)) {
       String bodyAsString =
-          URLDecoder.decode(new String(rawBody, StandardCharsets.UTF_8), StandardCharsets.UTF_8);
+              URLDecoder.decode(new String(rawBody, StandardCharsets.UTF_8), StandardCharsets.UTF_8);
       return Arrays.stream(bodyAsString.split("&"))
-          .filter(Objects::nonNull)
-          .map(param -> param.split("="))
-          .collect(Collectors.toMap(param -> param[0], param -> param.length == 1 ? "" : param[1]));
+              .filter(Objects::nonNull)
+              .map(param -> param.split("="))
+              .collect(Collectors.toMap(param -> param[0], param -> param.length == 1 ? "" : param[1]));
+    } else if (MediaType.XML_UTF_8.toString().equalsIgnoreCase(contentTypeHeader)) {
+      // XML
+      try {
+        return ConnectorsXmlObjectMapperSupplier.getCopy().readValue(rawBody, Object.class);
+      } catch (IOException e) {
+        throw new RuntimeException(e);
+      }
     } else {
       // Do our best to parse to JSON (throws exception otherwise)
       try {
